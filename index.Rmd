@@ -1,0 +1,176 @@
+---
+title: "Orquídeas y Áreas Silvestres Protegidas de Costa Rica"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preparativos
+
+## Carga de los paquetes
+```{r carga-paquetes, message=FALSE, warning=FALSE}
+library(sf)
+library(leaflet)
+library(leaflet.extras)
+library(leafem)
+library(dplyr)
+library(raster)
+library(rmapshaper)
+library(spData)
+```
+
+## Carga de los datos
+```{r}
+# Carga de la capa de cantones
+cantones <-
+  st_read(
+    "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/ign/delimitacion-territorial-administrativa/cr_cantones_simp_wgs84.geojson",
+    quiet = TRUE
+  )
+
+# Carga de la capa de provincias
+provincias <-
+  st_read(
+    "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/ign/delimitacion-territorial-administrativa/cr_provincias_simp_wgs84.geojson",
+    quiet = TRUE
+  )
+
+# Carga de la capa de Áreas Silvestres Protegidas
+asp <-
+  st_read(
+    "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/sinac/asp/asp-wgs84.geojson",
+    quiet = TRUE
+  )
+
+# Carga de los datos de orquídeas
+orquideas <-
+  st_read(
+    "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2021i-datos/main/gbif/orchidaceae-cr-registros.csv",
+    options = c(
+      "X_POSSIBLE_NAMES=decimalLongitude",
+      "Y_POSSIBLE_NAMES=decimalLatitude"
+    ),
+    quiet = TRUE
+  )
+
+# Asignación del Sistema de coordenadas
+st_crs(orquideas) = 4326
+```
+
+## Limpieza
+```{r cambio-tipo-datos}
+orquideas <-
+  orquideas %>%
+  mutate(coordinateUncertaintyInMeters = as.numeric(coordinateUncertaintyInMeters)) %>%
+  mutate(eventDate = as.Date(eventDate, "%Y-%m-%d"))
+
+cat("Cantidad original de registros: ", nrow(orquideas))
+```
+
+```{r limpieza-datos}
+# Descartar registros con alta incertidumbre en la ubicación
+orquideas <-
+  orquideas %>%
+  filter(!is.na(coordinateUncertaintyInMeters) & coordinateUncertaintyInMeters <= 1000)
+
+cat("Cantidad de registros después de descartar los de alta incertidumbre en la ubicación: ", nrow(orquideas))
+```
+
+```{r descartar-registros}
+# Eliminar registros con valor vacío = NA
+orquideas <-
+  orquideas %>%
+  filter(!is.na(species))
+
+cat("Cantidad de registros después de descartar el valor vacío del campo species: ", nrow(orquideas))
+```
+
+```{r eliminar-registros}
+# Eliminar registros con valor de Area marina protegida
+asp <-
+  asp%>%
+  filter(!is.na(descripcio))
+
+cat("Cantidad de registros después de descartar los de alta incertidumbre en la ubicación: ", nrow(asp))
+```
+
+# Procesamiento y visualización 
+
+## Mapa de cantidad de especies por provincia
+```{r calculo}
+# Creación de conjunto de datos con la cantidad de especies por provincia
+asp_registros <-
+  provincias %>%
+  st_make_valid(asp) %>%
+  group_by(provincias) %>%
+  summarize(areas = n_distinct(nombre_asp, na.rm = TRUE))
+```
+
+```{r map-provincias}
+# Paleta de colores
+colores_registros <-
+  colorNumeric(palette = "YlGnBu",
+               domain = asp_registros$areas,
+               na.color = "transparent")
+
+# Mapa Leaflet
+leaflet() %>%
+  addTiles(group = "OSM") %>%
+  addPolygons(
+    data = asp_registros,
+    fillColor = ~ colores_registros(asp_registros$areas),
+    fillOpacity = 0.7,
+    stroke = TRUE,
+    color = "black",
+    weight = 1,
+    popup = paste(
+      paste(
+        "<strong>Provincia:</strong>",
+        asp_registros$provincias
+      ),
+      paste(
+        "<strong>Cantidad de especies:</strong>",
+        asp_registros$areas
+        
+      ),
+      sep = '<br/>'
+    ),
+    group = "Provincias - areas"
+  ) %>%
+  addCircleMarkers(
+    stroke = F,
+    radius = 2,
+    fillColor = 'blue',
+    fillOpacity = 1,
+    popup = paste(
+      asp$species,
+      asp$provincia,
+      asp$canton,
+      asp$eventDate,
+    clusterOptions = markerClusterOptions(),
+    group = "Nombre_asp"
+  ) %>%  
+  addLayersControl(baseGroups = c("OSM"),
+                   overlayGroups = c("Provincias - areas", "Áreas de conservación")) %>%
+  addLegend(
+    position = "bottomleft",
+    pal = colores_registros,
+    values = asp_registros$areas,
+    group = "Provincias - areas",
+    title = "Áreas de conservación"
+  )
+
+```
+
+
+
+
+
+
+
+
+
+
+
